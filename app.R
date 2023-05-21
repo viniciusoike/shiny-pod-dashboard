@@ -6,28 +6,7 @@
 #
 #    http://shiny.rstudio.com/
 #
-
 library(shiny)
-library(ggplot2)
-library(readr)
-library(dplyr)
-
-sf::sf_use_s2(FALSE)
-
-pod <- read_csv("data/table_pod.csv")
-shp <- sf::st_read("data/table_pod.gpkg")
-shp <- sf::st_make_valid(shp)
-
-dictionary <- readxl::read_excel("data/dictionary.xlsx")
-
-pod <- dplyr::filter(pod, code_zone <= 342)
-shp <- dplyr::filter(shp, code_zone <= 342)
-
-var_choices <- names(pod)[-c(1:9)]
-var_choices
-
-
-source(here::here("R/map.R"))
 
 ui_data <- fluidPage(
   sidebarLayout(
@@ -45,7 +24,7 @@ ui_data <- fluidPage(
     ),
     mainPanel(
       width = 9,
-      plotOutput("scatter_pod")
+      plotly::plotlyOutput("scatter_pod", width = "90%", height = "500px")
     )
   )
 )
@@ -71,80 +50,126 @@ ui <- fluidPage(
   )
 )
 
-swap_variable <- function(x) {
-  dictionary |> dplyr::filter(var_label_pt == x) |> dplyr::pull(var_name)
-}
-
-vl_variables <- dictionary$var_name
-names(vl_variables) <- dictionary$var_label_pt
-
-plot_scatter <- function(df) {
-
-  ggplot(df, aes(x = x, y = y)) +
-    geom_point(aes(size = size), color = "#264653", alpha = 0.5) +
-    scale_size_continuous(range = c(1, 10)) +
-    theme_minimal() +
-    theme(legend.position = "bottom")
-
-}
-
-# Define server logic required to draw a histogram
 server <- function(input, output) {
+
+  x <- reactive({input$x_var})
+  y <- reactive({input$y_var})
+  z <- reactive({input$z_var})
+  logx <- reactive({input$trans_x})
+  logy <- reactive({input$trans_y})
 
   pod_data <- reactive({
 
-    df <- pod
+    prep_pod_data(x(), y(), z(), logx(), logy())
+
+  })
+
+  output$table <- renderTable({head(pod_data())})
+
+  output$scatter_pod <- plotly::renderPlotly({
 
     # Swap variables
-    x <- swap_variable(input$x_var)
-    y <- swap_variable(input$y_var)
-    size <- swap_variable(input$z_var)
 
-    if (input$trans_x == "Log") {df <- pod |> mutate(across(x, log))}
-    if (input$trans_y == "Log") {df <- pod |> mutate(across(y, log))}
-    if (input$trans_x == "Scale") {df <- pod |> mutate(across(x, ~as.numeric(scale(.x))))}
-    if (input$trans_y == "Scale") {df <- pod |> mutate(across(y, ~as.numeric(scale(.x))))}
+    print(str(pod_data()))
 
-    return(df)
+    plot_scatter <- function(x, y, z) {
+
+      xvar <- swap_variable(x)
+      yvar <- swap_variable(y)
+      sizevar <- swap_variable(z)
+
+      ggplot(pod_data(), aes(x = .data[[xvar]], y = .data[[yvar]])) +
+        geom_point(
+          aes(
+            size = .data[[sizevar]],
+            text = paste0(
+              "<b>Zona:</b> ", .data[["name_zone"]],
+              "<br><b>", x, ":</b> ", format(round(.data[[xvar]], 0), big.mark = ".", decimal.mark = ","),
+              "<br><b>", y, ":</b> ", format(round(.data[[yvar]], 2), big.mark = ".", decimal.mark = ","),
+              "<br><b>", z, ":</b> ", format(round(.data[[sizevar]], 1), big.mark = ".", decimal.mark = ",")
+              )
+            ),
+          color = "#264653",
+          alpha = 0.5) +
+          scale_size_continuous(
+            name = input$z_var,
+            range = c(1, 10)
+            ) +
+          scale_x_continuous(
+            labels = scales::label_number(big.mark = ".", decimal.mark = ",")
+          ) +
+          scale_y_continuous(
+            labels = scales::label_number(big.mark = ".", decimal.mark = ",")
+            ) +
+          labs(
+            x = input$x_var,
+            y = input$y_var
+          ) +
+          theme_minimal() +
+          theme(legend.position = "bottom")
+    }
+
+    plot <- plot_scatter(x(), y(), z())
+
+    plotly::ggplotly(plot, tooltip = "text")
 
   })
 
 
-  output$scatter_pod <- renderPlot({
 
-    # Swap variables
-    x <- swap_variable(input$x_var)
-    y <- swap_variable(input$y_var)
-    size <- swap_variable(input$z_var)
-
-    p <- ggplot(pod_data(), aes(x = .data[[x]], y = .data[[y]])) +
-      geom_point(aes(size = .data[[size]]), color = "#264653", alpha = 0.5) +
-      scale_size_continuous(
-        name = input$z_var,
-        range = c(1, 10)
-        ) +
-      scale_x_continuous(
-        labels = scales::label_number(big.mark = ".", decimal.mark = ",")
-      ) +
-      scale_y_continuous(
-        labels = scales::label_number(big.mark = ".", decimal.mark = ",")
-        ) +
-      labs(
-        x = input$x_var,
-        y = input$y_var
-      ) +
-      theme_minimal() +
-      theme(legend.position = "bottom")
-
-    if (input$is_trend) {
-      p <- p +
-        geom_smooth(color = "#e9c46a", method = "lm", se = FALSE)
-    }
-
-    p
-
-
-  }, res = 72, height = 600)
+  # pod_data <- reactive({
+  #
+  #   df <- pod
+  #
+  #   # Swap variables
+  #   x <- swap_variable(input$x_var)
+  #   y <- swap_variable(input$y_var)
+  #   size <- swap_variable(input$z_var)
+  #
+  #   if (input$trans_x == "Log") {df <- pod |> mutate(across(x, log))}
+  #   if (input$trans_y == "Log") {df <- pod |> mutate(across(y, log))}
+  #   if (input$trans_x == "Scale") {df <- pod |> mutate(across(x, ~as.numeric(scale(.x))))}
+  #   if (input$trans_y == "Scale") {df <- pod |> mutate(across(y, ~as.numeric(scale(.x))))}
+  #
+  #   return(df)
+  #
+  # })
+  #
+  # output$scatter_pod <- renderPlot({
+  #
+  #   # Swap variables
+  #   x <- swap_variable(input$x_var)
+  #   y <- swap_variable(input$y_var)
+  #   size <- swap_variable(input$z_var)
+  #
+  #   p <- ggplot(pod_data(), aes(x = .data[[x]], y = .data[[y]])) +
+  #     geom_point(aes(size = .data[[size]]), color = "#264653", alpha = 0.5) +
+  #     scale_size_continuous(
+  #       name = input$z_var,
+  #       range = c(1, 10)
+  #       ) +
+  #     scale_x_continuous(
+  #       labels = scales::label_number(big.mark = ".", decimal.mark = ",")
+  #     ) +
+  #     scale_y_continuous(
+  #       labels = scales::label_number(big.mark = ".", decimal.mark = ",")
+  #       ) +
+  #     labs(
+  #       x = input$x_var,
+  #       y = input$y_var
+  #     ) +
+  #     theme_minimal() +
+  #     theme(legend.position = "bottom")
+  #
+  #   if (input$is_trend) {
+  #     p <- p +
+  #       geom_smooth(color = "#e9c46a", method = "lm", se = FALSE)
+  #   }
+  #
+  #   p
+  #
+  #
+  # }, res = 72, height = 600)
 
   output$map_pod <- renderTmap({
     map_pod(
@@ -152,7 +177,7 @@ server <- function(input, output) {
       x = input$map_variable,
       style = input$map_style,
       n = input$map_group
-      )
+    )
   })
 
 
