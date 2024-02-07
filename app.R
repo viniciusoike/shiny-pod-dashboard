@@ -17,7 +17,8 @@ ui_data <- fluidPage(
       selectInput("y_var", "Choose Y variable:", choices = dictionary$var_label_pt, selected = "Carros por Família (média)"),
       selectInput("z_var", "Choose Z variable:", choices = dictionary$var_label_pt, selected = "Densidade Populacional"),
       checkboxInput("is_trend", "Include Trend", value = FALSE),
-      "Transformar",
+      selectInput("method", "Method", choices = c("lm", "glm", "gam", "loess", "rlm")),
+      h4("Transformar"),
       selectInput("trans_x", "Transform X", choices = c("None", "Scale", "Log"), selected = "None"),
       selectInput("trans_y", "Transform Y", choices = c("None", "Scale", "Log"), selected = "None"),
       selectInput("geo", "Agregar por:", choices = c("Zona OD", "Distrito"), selected = "Zona OD")
@@ -55,6 +56,8 @@ server <- function(input, output) {
   x <- reactive({input$x_var})
   y <- reactive({input$y_var})
   z <- reactive({input$z_var})
+  trend <- reactive({input$is_trend})
+  method <- reactive({input$method})
   logx <- reactive({input$trans_x})
   logy <- reactive({input$trans_y})
 
@@ -69,16 +72,13 @@ server <- function(input, output) {
   output$scatter_pod <- plotly::renderPlotly({
 
     # Swap variables
-
-    print(str(pod_data()))
-
-    plot_scatter <- function(x, y, z) {
+    plot_scatter <- function(x, y, z, trend, method) {
 
       xvar <- swap_variable(x)
       yvar <- swap_variable(y)
       sizevar <- swap_variable(z)
 
-      ggplot(pod_data(), aes(x = .data[[xvar]], y = .data[[yvar]])) +
+      p <- ggplot(pod_data(), aes(x = .data[[xvar]], y = .data[[yvar]])) +
         geom_point(
           aes(
             size = .data[[sizevar]],
@@ -107,9 +107,24 @@ server <- function(input, output) {
           ) +
           theme_minimal() +
           theme(legend.position = "bottom")
+
+      if (trend) {
+
+        if (method == "rlm") {
+          p <- p +
+            geom_smooth(method = MASS::rlm, se = FALSE)
+        } else {
+          p <- p +
+            geom_smooth(method = method, se = FALSE)
+        }
+
+      }
+
+      return(p)
+
     }
 
-    plot <- plot_scatter(x(), y(), z())
+    plot <- plot_scatter(x(), y(), z(), trend(), method())
 
     plotly::ggplotly(plot, tooltip = "text")
 
